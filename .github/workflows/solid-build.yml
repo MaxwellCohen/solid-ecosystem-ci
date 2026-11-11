@@ -1,0 +1,103 @@
+name: solid-build
+# Builds Solid (2.0 monorepo) at any commit from any repo, publishes it to pkg.pr.new (from THIS repo),
+# then builds + deploys the demo templates against it.
+# Install the GitHub App on this repo first: https://github.com/apps/pkg-pr-new
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Solid repo (owner/name)
+        default: solidjs/solid
+      ref:
+        description: Commit SHA, branch or tag
+        default: next
+      suffix:
+        description: Appended to the label (and Worker names) so variants of one commit do not collide
+        required: false
+      templates:
+        description: JSON list of demo templates to build and deploy
+        default: '["ssr"]'
+      reuse_run:
+        description: Run id whose solid-urls artifact to reuse instead of rebuilding Solid
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      label: ${{ steps.meta.outputs.label }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        if: ${{ inputs.reuse_run == '' }}
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          path: solid-src
+      - id: meta
+        env:
+          SUFFIX: ${{ inputs.suffix }}
+          REUSE: ${{ inputs.reuse_run }}
+        run: |
+          if [ -n "$REUSE" ]; then sha="run${REUSE}"; else sha=$(git -C solid-src rev-parse --short=8 HEAD); fi
+          echo "label=${sha}${SUFFIX:+-$SUFFIX}" >> "$GITHUB_OUTPUT"
+      - name: Reuse solid-urls from an earlier run
+        if: ${{ inputs.reuse_run != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download ${{ inputs.reuse_run }} -R ${{ github.repository }} -n solid-urls
+      - uses: pnpm/action-setup@v4
+        if: ${{ inputs.reuse_run == '' }}
+        with:
+          package_json_file: solid-src/package.json
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.reuse_run == '' }}
+        with:
+          node-version-file: solid-src/.nvmrc
+          cache: pnpm
+          cache-dependency-path: solid-src/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        if: ${{ inputs.reuse_run == '' }}
+        working-directory: solid-src
+      - run: pnpm run build
+        if: ${{ inputs.reuse_run == '' }}
+        working-directory: solid-src
+      - run: pnpm run types
+        if: ${{ inputs.reuse_run == '' }}
+        working-directory: solid-src
+      - name: Publish to pkg.pr.new
+        if: ${{ inputs.reuse_run == '' }}
+        run: node scripts/publish-solid.mjs solid-src
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solid-urls
+          path: solid-urls.json
+
+  demos:
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      # Job-level so the deploy step's `if` can see it (secrets are not allowed in `if`).
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    strategy:
+      fail-fast: false
+      matrix:
+        template: ${{ fromJson(inputs.templates) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: solid-urls }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node scripts/build-variant.mjs ${{ matrix.template }} ${{ needs.publish.outputs.label }}
+      - name: Deploy to Cloudflare
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        working-directory: .build/${{ matrix.template }}-${{ needs.publish.outputs.label }}
+        run: npm run deploy

@@ -1,0 +1,5 @@
+node_modules
+.build
+.cache
+solid-urls.json
+output.json
