@@ -38,6 +38,6 @@ export default async function cspJsMiddleware(
   if (event) event.locals.noJs = noJs;
 
   const response = await next();
-  if (noJs) response.headers.set('Content-Security-Policy', CSP_NO_JS);
+  if (noJs || url.searchParams.get('hydrate') === 'off') response.headers.set('Content-Security-Policy', CSP_NO_JS);
   return response;
 }

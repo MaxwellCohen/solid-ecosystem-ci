@@ -1,0 +1,1 @@
+document.addEventListener('click',function(e){var a=e.target.closest('[data-sel]');if(!a)return;e.preventDefault();var p=a.dataset.sel.split(':'),on=p[1]==='1';document.querySelectorAll('#controls input[name=only]').forEach(function(i){if(i.dataset.g===p[0])i.checked=on})})
