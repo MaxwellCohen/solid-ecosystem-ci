@@ -8,9 +8,11 @@ import {
 } from './lib/csp-js';
 
 export default async function cspJsMiddleware(
-  request: Request,
+  eventOrRequest: any,
   next: () => Promise<Response>,
 ): Promise<Response> {
+  // Newer @solidjs/vite-plugin passes the request event; older passed a Request.
+  const request: Request = eventOrRequest.request ?? eventOrRequest;
   const url = new URL(request.url);
 
   if (url.pathname === TOGGLE_PATH) {
@@ -32,7 +34,7 @@ export default async function cspJsMiddleware(
   }
 
   const noJs = parseNoJsCookie(request.headers.get('cookie'));
-  const event = getRequestEvent();
+  const event = eventOrRequest.request ? eventOrRequest : getRequestEvent();
   if (event) event.locals.noJs = noJs;
 
   const response = await next();

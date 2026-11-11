@@ -20,6 +20,8 @@ export default defineConfig({
     }),
     fileRoutes({ types: true }),
   ],
+  // Bundle solid-adjacent packages so SSR shares one solid-js instance.
+  ssr: { noExternal: ['@solidjs/meta', '@solidjs/router'] },
   server: {
     port: 3001,
   },
