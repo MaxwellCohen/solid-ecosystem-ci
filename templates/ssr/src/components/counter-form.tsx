@@ -1,6 +1,10 @@
 import { createSignal } from 'solid-js';
 import { getRequestEvent } from '@solidjs/web';
-import { COUNT_PATH, parseCount } from '../lib/csp-js';
+import { formAction } from '@solidjs/router';
+import { parseCount } from '../lib/csp-js';
+import { increment } from '../actions';
+
+const incrementAction = formAction(increment);
 
 function currentPath(): string {
   const event = getRequestEvent();
@@ -18,23 +22,21 @@ function serverCount(): number {
 }
 
 export function CounterForm() {
-  const count = serverCount();
+  const [count, setCount] = createSignal(serverCount());
   const path = currentPath();
   const [clientCount, setClientCount] = createSignal(0);
 
   return (
     <div class="flex flex-col gap-2">
-      {/* Server action: plain form POST → 303 back, so it works with JS off. */}
+      {/* Server action: works with JS off (POST + 303) and on (router-driven). */}
       <form
-        method="post"
-        action={`${COUNT_PATH}?redirect=${encodeURIComponent(path)}`}
-        class="flex"
-      >
+        action={incrementAction.onSettled(() => setCount(parseCount(document.cookie)))} method="post" class="flex">
+        <input type="hidden" name="redirect" value={path} />
         <button
           class="flex-1 rounded-md bg-blue-500 p-2 text-white hover:bg-blue-600"
           type="submit"
         >
-          Interactive Button Clicked {count} times
+          Interactive Button Clicked {count()} times
         </button>
       </form>
       <button

@@ -17,6 +17,7 @@ export default defineConfig({
       ssr: true,
       extensions: ['.jsx', '.tsx'],
       diagnostics: true,
+      serverFunctions: true,
     }),
     fileRoutes({ types: true }),
   ],
