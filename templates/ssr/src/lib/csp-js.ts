@@ -18,10 +18,3 @@ export function safeRedirectPath(target: string, requestUrl: string): string {
     return '/';
   }
 }
-
-export const COUNT_COOKIE = 'solid-dpu-count';
-
-export function parseCount(cookieHeader: string | null | undefined): number {
-  const m = cookieHeader && /(?:^|;\s*)solid-dpu-count=(\d+)/.exec(cookieHeader);
-  return m ? Number(m[1]) : 0;
-}
