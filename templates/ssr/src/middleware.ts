@@ -1,5 +1,8 @@
 import { getRequestEvent } from '@solidjs/web';
 import {
+  COUNT_COOKIE,
+  COUNT_PATH,
+  parseCount,
   CSP_NO_JS,
   NO_JS_COOKIE,
   parseNoJsCookie,
@@ -30,6 +33,18 @@ export default async function cspJsMiddleware(
     } else {
       headers.append('Set-Cookie', `${NO_JS_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`);
     }
+    return new Response(null, { status: 303, headers });
+  }
+
+  // Server action: a plain form POST, so the "Interactive" button works with JS off.
+  if (url.pathname === COUNT_PATH && request.method === 'POST') {
+    const next = parseCount(request.headers.get('cookie')) + 1;
+    const redirect = safeRedirectPath(
+      url.searchParams.get('redirect') ?? request.headers.get('referer') ?? '/',
+      request.url,
+    );
+    const headers = new Headers({ Location: redirect });
+    headers.append('Set-Cookie', `${COUNT_COOKIE}=${next}; Path=/; Max-Age=86400; SameSite=Lax`);
     return new Response(null, { status: 303, headers });
   }
 
