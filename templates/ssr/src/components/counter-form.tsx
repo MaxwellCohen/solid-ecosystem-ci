@@ -1,19 +1,11 @@
 import { createSignal } from 'solid-js';
 import { getRequestEvent } from '@solidjs/web';
-import { formAction } from '@solidjs/router';
+import { formAction, useSubmissions } from '@solidjs/router';
 import { parseCount } from '../lib/csp-js';
 import { increment } from '../actions';
 
 const incrementAction = formAction(increment);
 
-function currentPath(): string {
-  const event = getRequestEvent();
-  if (event) {
-    const url = new URL(event.request.url);
-    return url.pathname + url.search;
-  }
-  return typeof location !== 'undefined' ? location.pathname + location.search : '/';
-}
 
 function serverCount(): number {
   const event = getRequestEvent();
@@ -22,16 +14,15 @@ function serverCount(): number {
 }
 
 export function CounterForm() {
-  const [count, setCount] = createSignal(serverCount());
-  const path = currentPath();
+  const initial = serverCount();
+  const submissions = useSubmissions(incrementAction);
+  const count = () => submissions.at(-1)?.result ?? initial;
   const [clientCount, setClientCount] = createSignal(0);
 
   return (
     <div class="flex flex-col gap-2">
       {/* Server action: works with JS off (POST + 303) and on (router-driven). */}
-      <form
-        action={incrementAction.onSettled(() => setCount(parseCount(document.cookie)))} method="post" class="flex">
-        <input type="hidden" name="redirect" value={path} />
+      <form action={incrementAction} method="post" class="flex">
         <button
           class="flex-1 rounded-md bg-blue-500 p-2 text-white hover:bg-blue-600"
           type="submit"
