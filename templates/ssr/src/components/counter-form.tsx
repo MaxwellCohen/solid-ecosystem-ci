@@ -1,24 +1,22 @@
 import { createSignal } from 'solid-js';
-import { formAction, useSubmissions } from '@solidjs/router';
+import { createActionState } from '../lib/action-state';
 import { increment } from '../actions';
 
-const incrementAction = formAction(increment);
+const useCounter = createActionState(increment, 0);
 
 export function CounterForm() {
-  const submissions = useSubmissions(incrementAction);
-  const count = () => submissions.at(-1)?.result ?? 0;
+  const [count, action, pending] = useCounter();
   const [clientCount, setClientCount] = createSignal(0);
 
   return (
     <div class="flex flex-col gap-2">
       {/* Server action: works with JS off (POST + 303) and on (router-driven). */}
-      <form action={incrementAction} method="post" class="flex">
-        <input type="hidden" name="count" value={count()} />
+      <form action={action()} method="post" class="flex">
         <button
           class="flex-1 rounded-md bg-blue-500 p-2 text-white hover:bg-blue-600"
           type="submit"
         >
-          Interactive Button Clicked {count()} times
+          Interactive Button Clicked {count()} times{pending() ? ' …' : ''}
         </button>
       </form>
       <button
