@@ -5,3 +5,20 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+/* Flash a panel as it lands — a CSS animation, so it shows with JS off too. */
+@keyframes reveal-in {
+  from {
+    box-shadow: 0 0 0 4px rgb(139 92 246 / 0.6);
+    transform: translateY(4px);
+    opacity: 0.4;
+  }
+}
+.reveal-in {
+  animation: reveal-in 700ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-in {
+    animation: none;
+  }
+}

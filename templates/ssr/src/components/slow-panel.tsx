@@ -17,7 +17,7 @@ export function SlowPanel(props: SlowPanelProps) {
   return (
     <Loading fallback={<Skeleton label={props.label.toLowerCase()} />}>
       <section
-        class={`rounded-md border px-4 py-6 ${panelTones[props.tone ?? 'sky']}`}
+        class={`reveal-in rounded-md border px-4 py-6 ${panelTones[props.tone ?? 'sky']}`}
       >
         <h2 class="text-lg font-bold tracking-tight">{data().label}</h2>
         <p class="mt-1 text-sm opacity-80">Resolved after {data().delayMs}ms</p>
