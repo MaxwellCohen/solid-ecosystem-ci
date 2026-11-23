@@ -6,10 +6,16 @@ import {
 	Errored,
 	For,
 	Loading,
+	Match,
 	onSettled,
+	Repeat,
+	Reveal,
 	Show,
+	Switch,
+	createProjection,
 	useContext
 } from 'solid-js';
+import { dynamic } from '@solidjs/web';
 
 /**
  * Solid port of the Preact/React streaming hydration harness trees. Every
@@ -24,6 +30,9 @@ import {
  * yet holds the subtree when hydration reaches it.
  */
 
+// Solid's hydration trace swaps the global Promise for a stub that never
+// settles; a gate made inside a traced computation must still open.
+const NativePromise = Promise;
 export const env = { gates: new Map() };
 export function resetEnv() {
 	env.gates = new Map();
@@ -32,7 +41,7 @@ export function gate(key) {
 	let g = env.gates.get(key);
 	if (!g) {
 		let res;
-		const p = new Promise((r) => (res = r));
+		const p = new NativePromise((r) => (res = r));
 		g = {
 			p,
 			done: false,
@@ -156,6 +165,68 @@ const sharedBoundary = () => (
 );
 
 const reverse = (st) => ({ order: [...st.order].reverse() });
+
+/**
+ * A boundary slot for the Solid trees: its fallback is marked data-sfb=<k>
+ * and its content data-slot=<k>, so the runner can tell which slots show
+ * what at every step (the `reveal` checks).
+ */
+function Slot(props) {
+	return (
+		<Boundary fallback={<span data-fb="" data-sfb={props.k}>{props.k}…</span>}>
+			<Suspends server={props.server === undefined ? props.k : props.server} client={props.client}>
+				<div data-slot={props.k}>
+					<Counter id={props.k} />
+					{props.children}
+				</div>
+			</Suspends>
+		</Boundary>
+	);
+}
+/** Fails after its gate on both sides: the server streams the <Errored> outcome. */
+function ThrowsLater(props) {
+	const fail = () => {
+		throw new Error('boom late');
+	};
+	const v = createMemo(() => {
+		const g = gate(SERVER ? 's:' + props.server : 'c:' + props.client);
+		return g.done ? fail() : g.p.then(fail);
+	});
+	return <>{(v(), props.children)}</>;
+}
+/** An async generator memo: the server yields after each gate, the client at once. */
+function StreamText() {
+	const v = createMemo(async function* () {
+		if (SERVER) await gate('s:a').p;
+		yield 'one';
+		if (SERVER) await gate('s:b').p;
+		yield 'two';
+	});
+	return <p data-stream="">{v()}</p>;
+}
+/** A projection whose generator pushes a token per gate. */
+function Tokens() {
+	const p = createProjection(
+		async function* (draft) {
+			draft.tokens = [];
+			for (const k of ['a', 'b']) {
+				if (SERVER) await gate('s:' + k).p;
+				draft.tokens.push(k);
+				yield;
+			}
+		},
+		{ tokens: [] }
+	);
+	return (
+		<ul>
+			<For each={p.tokens}>{(t) => <li>{t}</li>}</For>
+		</ul>
+	);
+}
+function DynamicBox(props) {
+	const Tag = dynamic(() => (props.big ? 'section' : 'div'));
+	return <Tag data-d="">{props.children}</Tag>;
+}
 
 export const scenarios = {
 	// --- one boundary, different shapes ---------------------------------
@@ -444,31 +515,37 @@ export const scenarios = {
 
 	// --- errors and cut streams -----------------------------------------
 	serverError: {
+		nojs: false, // the expected page needs a script by definition
 		about: 'The server render fails inside a boundary (ThrowsOnServer), so the client must render that boundary itself, after late client code. The final page must show its counter, hydrated once.',
 		serverGates: [], clientGates: ['x'],
 		render: () => <div><Boundary fallback={fallbackText('F')}><ThrowsOnServer><Suspends client="x"><Counter id="in" /></Suspends></ThrowsOnServer></Boundary><Counter id="z" /></div>
 	},
 	serverErrorLate: {
+		nojs: false, // the expected page needs a script by definition
 		about: 'A boundary fails on the server after waiting on gate a, while a second boundary streams on gate b. The client must render the failed boundary after late client code, and the second must stream.',
 		serverGates: ['a', 'b'], clientGates: ['x'],
 		render: () => <div><Boundary fallback={fallbackText('F')}><ThrowsOnServerLater server="a"><Suspends client="x"><Counter id="in" /></Suspends></ThrowsOnServerLater></Boundary><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="g" /></Suspends></Boundary><Counter id="z" /></div>
 	},
 	serverErrorNested: {
+		nojs: false, // the expected page needs a script by definition
 		about: 'An outer boundary streams on gate a (late client code), holding a counter and an inner boundary that fails on the server after gate b. The client must render the inner part.',
 		serverGates: ['a', 'b'], clientGates: ['x'],
 		render: () => <div><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><div><Counter id="o" /><Boundary fallback={fallbackText('G')}><ThrowsOnServerLater server="b"><Counter id="in" /></ThrowsOnServerLater></Boundary></div></Suspends></Boundary><Counter id="z" /></div>
 	},
 	abort: {
+		nojs: false, // the expected page needs a script by definition
 		about: 'The server render is aborted at some point among gates a and b, so some boundaries may never arrive. The client must render what is missing (outer needs late client code) and end with all counters, hydrated once.',
 		serverGates: ['a', 'b', '!'], clientGates: ['x'],
 		render: () => <div><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><div><Counter id="o" /><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="i" /></Suspends></Boundary></div></Suspends></Boundary><Counter id="z" /></div>
 	},
 	clientError: {
+		nojs: false, // the expected page needs a script by definition
 		about: 'A boundary streams a b element on gate a, but its content throws on the client, inside an error boundary. The error boundary must show caught, the error is expected, and the other counter must hydrate once.',
 		serverGates: ['a'], clientGates: [], expectErrors: true,
 		render: () => <div><ErrorBoundary><Boundary fallback={fallbackText('F')}><Suspends server="a"><ThrowsOnClient><b>srv</b></ThrowsOnClient></Suspends></Boundary></ErrorBoundary><Counter id="z" /></div>
 	},
 	clientErrorSibling: {
+		nojs: false, // the expected page needs a script by definition
 		about: 'Two boundaries stream counters (gates a and b) around a child that throws on the client, all inside an error boundary. The error boundary must show caught, the error is expected, and the other counter must hydrate once.',
 		serverGates: ['a', 'b'], clientGates: [], expectErrors: true,
 		render: () => <div><ErrorBoundary><div><Boundary fallback={fallbackText('F')}><Suspends server="a"><Counter id="in" /></Suspends></Boundary><ThrowsOnClient><b>srv</b></ThrowsOnClient><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="g" /></Suspends></Boundary></div></ErrorBoundary><Counter id="z" /></div>
@@ -549,6 +626,82 @@ export const scenarios = {
 		about: 'An attribute and a title inside a streamed boundary (gate a, late client code) show the re-render counter. Both must show the latest value after re-renders, with the counters hydrated once.',
 		serverGates: ['a'], clientGates: ['x'],
 		render: (st, tick) => <div><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><span data-t={tick()} title={'t' + tick()}>attr</span><Counter id="in" /></Suspends></Boundary><Counter id="z" /></div>
+	},
+	// --- Solid: <Reveal>, <Errored> outcomes, streamed async values, control flow ---
+	// `reveal` is checked at every step (until the first action): which slots
+	// may show content, and which fallbacks, for the group's order.
+	revealSequential: {
+		about: 'A sequential <Reveal> of three slots streamed on gates a, b, c (b also waits on client code x). At no step may a slot show its content before every slot ahead of it does; the page must end with all three counters hydrated once.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'], reveal: ['sequential', 'a', 'b', 'c'],
+		render: () => <div><Reveal><Slot k="a" /><Slot k="b" client="x" /><Slot k="c" /></Reveal><Counter id="z" /></div>
+	},
+	revealTogether: {
+		about: 'A together <Reveal> of three slots streamed on gates a, b, c (c also waits on client code x). At every step either no slot shows its content or all three do.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'], reveal: ['together', 'a', 'b', 'c'],
+		render: () => <div><Reveal order="together"><Slot k="a" /><Slot k="b" /><Slot k="c" client="x" /></Reveal><Counter id="z" /></div>
+	},
+	revealNatural: {
+		about: 'A natural <Reveal>: each slot shows as soon as its own gate opens. No ordering constraint; the page must end with all three counters hydrated once.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'],
+		render: () => <div><Reveal order="natural"><Slot k="a" client="x" /><Slot k="b" /><Slot k="c" /></Reveal><Counter id="z" /></div>
+	},
+	revealCollapsed: {
+		about: 'A collapsed sequential <Reveal>: content in order, and only the frontier slot (the first not yet shown) may show its fallback. Slots behind it show nothing.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'], reveal: ['collapsed', 'a', 'b', 'c'],
+		render: () => <div><Reveal collapsed><Slot k="a" /><Slot k="b" client="x" /><Slot k="c" /></Reveal><Counter id="z" /></div>
+	},
+	revealNested: {
+		about: 'A together <Reveal> (b, c) nested in a sequential one after slot a. b and c show together, and never before a.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'], reveal: ['sequential', 'a', ['together', 'b', 'c']],
+		render: () => <div><Reveal><Slot k="a" client="x" /><Reveal order="together"><Slot k="b" /><Slot k="c" /></Reveal></Reveal><Counter id="z" /></div>
+	},
+	revealHeld: {
+		about: 'Slot b of a sequential <Reveal> holds a nested boundary d of its own. d resolving early must not show anything before b, and b not before a.',
+		serverGates: ['a', 'b', 'd'], clientGates: ['x'], reveal: ['sequential', 'a', 'b'],
+		render: () => <div><Reveal><Slot k="a" /><Slot k="b"><Slot k="d" client="x" /></Slot></Reveal><Counter id="z" /></div>
+	},
+	revealList: {
+		about: 'A sequential <Reveal> over a <For> of three slots that an action reverses. In order until the action; the page must end reversed, counters hydrated once.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'], init: { order: ['a', 'b', 'c'] }, reveal: ['sequential', 'a', 'b', 'c'],
+		actions: { reverse }, seq: ['reverse'],
+		render: (st) => <div><Reveal><For each={st().order}>{(k) => <Slot k={k} client={k == 'b' ? 'x' : null} />}</For></Reveal><Counter id="z" /></div>
+	},
+	erroredOutcome: {
+		about: 'A boundary inside <Errored> fails after gate a, on the server and (after client code x) on the client. The server streams the <Errored> fallback as the outcome; the page must end showing it, with the other counter hydrated once.',
+		serverGates: ['a'], clientGates: ['x'], expectErrors: true,
+		render: () => <div><Errored fallback={() => <p data-caught="">caught</p>}><Boundary fallback={fallbackText('F')}><ThrowsLater server="a" client="x"><Counter id="in" /></ThrowsLater></Boundary></Errored><Counter id="z" /></div>
+	},
+	asyncIterable: {
+		about: 'A memo returning an async generator yields "one" after gate a and "two" after gate b: the first value streams the boundary, the second streams as an update. The page must end showing "two".',
+		serverGates: ['a', 'b'], clientGates: [],
+		render: () => <div><Boundary fallback={fallbackText('F')}><StreamText /></Boundary><Counter id="z" /></div>
+	},
+	projection: {
+		about: 'A createProjection generator pushes token a after gate a and token b after gate b. The list must end with both tokens, in order.',
+		serverGates: ['a', 'b'], clientGates: [],
+		render: () => <div><Boundary fallback={fallbackText('F')}><Tokens /></Boundary><Counter id="z" /></div>
+	},
+	switchMatch: {
+		about: 'A <Switch> shows slot a (gate a, client code x); an action switches it to slot b, which the server never rendered. The page must end with slot b, its counter hydrated once.',
+		serverGates: ['a'], clientGates: ['x'], init: { tab: 'a' },
+		actions: { flip: () => ({ tab: 'b' }) }, seq: ['flip'],
+		render: (st) => <div><Switch><Match when={st().tab == 'a'}><Slot k="a" client="x" /></Match><Match when={st().tab == 'b'}><Slot k="b" server={null} /></Match></Switch><Counter id="z" /></div>
+	},
+	dynamicTag: {
+		about: 'A dynamic() element wraps a streamed slot (gate a, client code x); an action changes it from div to section. The slot must end inside the section, its counter hydrated once.',
+		serverGates: ['a'], clientGates: ['x'], init: { big: false },
+		actions: { grow: () => ({ big: true }) }, seq: ['grow'],
+		render: (st) => <div><DynamicBox big={st().big}><Slot k="a" client="x" /></DynamicBox><Counter id="z" /></div>
+	},
+	indexList: {
+		about: 'An unkeyed <For keyed={false}> (Solid 1 Index) of three streamed slots, one waiting on client code x. All three must end in order, hydrated once.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'],
+		render: () => <div><For each={['a', 'b', 'c']} keyed={false}>{(k) => <Slot k={k()} client={k() == 'b' ? 'x' : null} />}</For><Counter id="z" /></div>
+	},
+	repeat: {
+		about: 'A <Repeat count={3}> of streamed slots, the last waiting on client code x. All three must end in order, hydrated once.',
+		serverGates: ['a', 'b', 'c'], clientGates: ['x'],
+		render: () => <div><Repeat count={3}>{(i) => <Slot k={'abc'[i]} client={i == 2 ? 'x' : null} />}</Repeat><Counter id="z" /></div>
 	}
 };
 

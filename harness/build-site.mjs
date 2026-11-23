@@ -89,6 +89,8 @@ for (const label of Object.keys(TARGETS)) {
 			seq: sc.seq || [],
 			expectErrors: !!sc.expectErrors,
 			dupOk: !!sc.dupOk,
+			reveal: sc.reveal || null,
+			nojs: sc.nojs !== false,
 			source: src[name] || ''
 		};
 	});
@@ -100,14 +102,15 @@ for (const label of Object.keys(TARGETS)) {
 // recorded results: every target ran the same seed and schedules
 {
 	const results = [];
-	for (const label of Object.keys(TARGETS)) {
-		const p = `${here}out/${label}/summary.stream.json`;
-		if (!fs.existsSync(p)) continue;
-		const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-		results.push({ label, mode: 'stream', browser: 'chrome', n: j.n, seed: j.seed, totals: j.totals, scenarios: j.scenarios });
-	}
+	for (const mode of ['stream', 'nojs'])
+		for (const label of Object.keys(TARGETS)) {
+			const p = `${here}out/${label}/summary.${mode}.json`;
+			if (!fs.existsSync(p)) continue;
+			const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+			results.push({ label, mode, browser: 'chrome', n: j.n, seed: j.seed, totals: j.totals, scenarios: j.scenarios });
+		}
 	fs.writeFileSync(site + 'results.json', JSON.stringify(results));
-	fs.writeFileSync(site + 'compare.json', JSON.stringify(results));
+	fs.writeFileSync(site + 'compare.json', JSON.stringify(results.filter((r) => r.mode == 'stream')));
 	const timing = {};
 	for (const label of Object.keys(TARGETS)) {
 		const p = `${here}out/${label}/timing.json`;

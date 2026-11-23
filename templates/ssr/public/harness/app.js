@@ -18,7 +18,7 @@ const byName = Object.fromEntries(scenarios.map((s) => [s.name, s]));
 // ---- recorded results ----
 const results = await getJSON('results.json').catch(() => []);
 {
-	const order = ['stream', 'doc', 'async'];
+	const order = ['stream', 'nojs', 'doc', 'async'];
 	const rows = results.slice().sort((a, b) => {
 		const ia = TARGETS.findIndex((t) => t[0] == a.label), ib = TARGETS.findIndex((t) => t[0] == b.label);
 		return order.indexOf(a.mode) - order.indexOf(b.mode) || ['chrome', 'firefox', 'webkit'].indexOf(a.browser) - ['chrome', 'firefox', 'webkit'].indexOf(b.browser) || ia - ib;
@@ -52,6 +52,12 @@ for (const [k] of TARGETS) {
 	else srcInfo.push(`${k}: no recorded results`);
 }
 $('src-note').textContent = 'Sources: ' + srcInfo.join('; ') + '.';
+// the JavaScript-off run: the same responses, scripts blocked
+const recordedNoJs = {};
+for (const [k] of TARGETS) {
+	const r = results.find((r) => r.label == k && r.mode == 'nojs');
+	if (r) recordedNoJs[k] = r.scenarios;
+}
 const yours = {};
 const exs = [];
 const sig = (x) => (!x ? null : x.fails ? 'fail' : x.ssrFail ? 'ssr' : x.glitchRuns ? 'glitch' : 'ok');
@@ -80,7 +86,7 @@ function chips(schedule, order) {
 	const o = Array.isArray(order) ? order.join('') : order || '';
 	return `<ol class="chips" aria-label="Schedule"><li>first chunk</li>${items.join('')}${o ? `<li class="o">server promises resolve in order ${esc(o.split('').map((c) => (c == '!' ? '(the server aborts)' : c)).join(', '))}</li>` : ''}</ol>`;
 }
-function lineHTML(k, name, x, tag, src) {
+function lineHTML(k, name, x, tag, noReplay) {
 	if (!x) return `<div class="line"><span class="tag">${tag}</span> <span class="mute">no data</span></div>`;
 	const bad = x.fails || x.ssrFail;
 	let h = `<div class="line"><span class="tag">${tag}</span> <span class="pill ${bad ? 'bad' : 'ok'}" title="failing runs / runs">${x.fails}/${x.runs}</span> <span title="server DOM kept">kept ${pct(x.kept, x.total)}</span>` +
@@ -93,7 +99,7 @@ function lineHTML(k, name, x, tag, src) {
 		const [g, w] = e.want ? [diff(e.got, e.want), diff(e.want, e.got, 'ok')] : [esc(e.got), ''];
 		h += `<div class="ex"><div>[${esc(e.phase)}] x${e.count}</div>${chips(e.schedule, e.order)}` +
 			`<div class="gw${e.want ? '' : ' one'}">${e.want ? `<div><b>Expected</b><pre>${w}</pre></div>` : ''}<div><b>${e.want ? 'This build' : 'error'}</b><pre>${g}</pre></div></div>` +
-			`<button type="button" class="sec rp" data-ex="${exs.length - 1}">Replay</button><pre class="trace" hidden></pre></div>`;
+			(noReplay ? '</div>' : `<button type="button" class="sec rp" data-ex="${exs.length - 1}">Replay</button><pre class="trace" hidden></pre></div>`);
 	}
 	if (x.glitch) {
 		exs.push({ k, name, e: x.glitch });
@@ -104,7 +110,14 @@ function lineHTML(k, name, x, tag, src) {
 }
 function renderLine(card, k, which) {
 	const name = card.dataset.n, el = card.querySelector(`[data-k="${k}"] .${which}`);
-	if (which == 'rec') el.innerHTML = lineHTML(k, name, (recorded[k] || {})[name], 'recorded');
+	if (which == 'rec') {
+		const sc = byName[name];
+		el.innerHTML =
+			lineHTML(k, name, (recorded[k] || {})[name], 'JS on') +
+			(sc && !sc.nojs
+				? '<div class="line"><span class="tag">JS off</span> <span class="mute">not run: the expected page needs a script</span></div>'
+				: recordedNoJs[k] ? lineHTML(k, name, recordedNoJs[k][name], 'JS off', true) : '');
+	}
 	else el.innerHTML = yours[k] && yours[k][name] ? lineHTML(k, name, yours[k][name], 'your run') : '';
 }
 const flags = {};
@@ -157,7 +170,8 @@ function runJob(k, bundle, sc, j, trace, mount) {
 		expectErrors: !!sc.expectErrors,
 		dupOk: !!sc.dupOk,
 		doc: k == 'react',
-		mount
+		mount,
+		reveal: sc.reveal
 	});
 }
 

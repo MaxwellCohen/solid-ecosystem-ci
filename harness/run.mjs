@@ -4,7 +4,7 @@
 // browser page runs.
 import fs from 'fs';
 import { buildTarget } from './build.mjs';
-import { makeGen, inPage } from './site/runner.js';
+import { makeGen, inPage, noJsPage } from './site/runner.js';
 
 process.on('unhandledRejection', (e) => console.warn('unhandled rejection in ssr:', (e && e.message) || e));
 const args = Object.fromEntries(
@@ -15,6 +15,7 @@ const args = Object.fromEntries(
 );
 const label = args.target || 'dpu';
 const outName = args.out || label;
+const mode = args.mode || 'stream';
 const N = +(args.n || 40);
 const only = args.only && args.only.split(',');
 const here = new URL('.', import.meta.url);
@@ -38,6 +39,7 @@ const cache = new Map();
 for (const name of Object.keys(scenarios)) {
 	if (only && !only.includes(name)) continue;
 	const sc = scenarios[name];
+	if (mode == 'nojs' && sc.nojs === false) continue;
 	const jobs = [],
 		seen = new Set();
 	let ssrFail;
@@ -50,7 +52,11 @@ for (const name of Object.keys(scenarios)) {
 			ssrFail = res.errors.join(' | ');
 			continue;
 		}
-		const schedule = args.sched ? args.sched.split(' ') : gen.genSchedule(sc, res.writes.length - 1);
+		const schedule = args.sched
+			? args.sched.split(' ')
+			: mode == 'nojs'
+				? gen.genNoJs(res.writes.length - 1)
+				: gen.genSchedule(sc, res.writes.length - 1);
 		const key = order.join('') + '|' + schedule.join(' ');
 		if (seen.has(key)) continue;
 		seen.add(key);
@@ -62,7 +68,9 @@ for (const name of Object.keys(scenarios)) {
 	for (let i = 0; i < jobs.length; i += CONC) {
 		const rs = await Promise.all(
 			jobs.slice(i, i + CONC).map((j) =>
-				page.evaluate(inPage, {
+				mode == 'nojs'
+					? page.evaluate(noJsPage, { name: j.name, writes: j.writes, schedule: j.schedule, bundle, reveal: sc.reveal, canonIds: name == 'useId' })
+					: page.evaluate(inPage, {
 					name: j.name,
 					writes: j.writes,
 					schedule: j.schedule,
@@ -74,7 +82,8 @@ for (const name of Object.keys(scenarios)) {
 					noMount: /^later/.test(name),
 					expectErrors: !!sc.expectErrors,
 					dupOk: !!sc.dupOk,
-					doc: false
+					doc: false,
+					reveal: sc.reveal
 				})
 			)
 		);
@@ -82,6 +91,7 @@ for (const name of Object.keys(scenarios)) {
 	}
 	fails.sort((a, b) => a.schedule.length - b.schedule.length);
 	const all = [...passes, ...fails];
+	for (const r of all) (r.glitches ||= []), (r.recoverable ||= []), (r.kept ||= 0), (r.total ||= 0);
 	const glitchRuns = all.filter((r) => r.glitches.length).length;
 	const kept = passes.reduce((n, r) => n + r.kept, 0),
 		total = passes.reduce((n, r) => n + r.total, 0),
@@ -123,13 +133,13 @@ for (const name of Object.keys(scenarios)) {
 }
 const shapes = Object.values(summary);
 console.log(
-	`\n${label}: ${shapes.filter((s) => !s.fails && !s.ssrFail).length}/${shapes.length} scenarios pass, ` +
+	`\n${label} (${mode}): ${shapes.filter((s) => !s.fails && !s.ssrFail).length}/${shapes.length} scenarios pass, ` +
 		`${tot.fails}/${tot.runs} runs fail, ${tot.glitchRuns} runs glitch, ` +
 		`server DOM kept ${tot.total ? Math.round((100 * tot.kept) / tot.total) : '-'}%, ${tot.litter} runs leave litter`
 );
-fs.mkdirSync(new URL(`./out/${label}/`, here), { recursive: true });
+fs.mkdirSync(new URL(`./out/${outName}/`, here), { recursive: true });
 fs.writeFileSync(
-	new URL(`./out/${label}/summary.stream${args.tag ? '.' + args.tag : ''}.json`, here),
-	JSON.stringify({ label, mode: 'stream', n: N, seed: +(args.seed || 1), totals: tot, scenarios: summary }, null, 1)
+	new URL(`./out/${outName}/summary.${mode}${args.tag ? '.' + args.tag : ''}.json`, here),
+	JSON.stringify({ label, mode, n: N, seed: +(args.seed || 1), totals: tot, scenarios: summary }, null, 1)
 );
 await browser.close();

@@ -56,10 +56,52 @@ export function makeGen({ seed = 1, split = 0.25, cut = 0, wait } = {}) {
 		}
 		return out;
 	}
-	return { rnd, pick, shuffle, genSchedule };
+	/** JavaScript off: only the response, in parts, with pauses between them. */
+	function genNoJs(nWrites) {
+		const out = [];
+		const wmode = wait || pick(['mix', 'mix', 'macro', 'micro']);
+		const w = () => (wmode == 'mix' ? pick(['w0', 'w1', 'w2', 'w2']) : wmode == 'macro' ? 'w2' : wmode == 'micro' ? 'w1' : 'w0');
+		for (let i = 0; i < nWrites; i++) {
+			if (rnd() < split) out.push('Wa:' + rnd().toFixed(3), w(), 'W', w());
+			else out.push('W', w());
+		}
+		return out;
+	}
+	return { rnd, pick, shuffle, genSchedule, genNoJs };
 }
 
-export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle, canonIds, noMount, expectErrors, dupOk, doc, mount }) => {
+export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle, canonIds, noMount, expectErrors, dupOk, doc, mount, reveal }) => {
+	// Which slots show content and which show fallbacks, against a <Reveal>
+	// spec: [order, ...units], a unit a slot key or a nested spec.
+	const revealCheck = (r, spec) => {
+		if (!r) return;
+		const vis = (sel) => [...r.querySelectorAll(sel)].some((e) => !e.closest('[hidden],template'));
+		const shown = (k) => vis(`[data-slot="${k}"]`),
+			fb = (k) => vis(`[data-sfb="${k}"]`);
+		const leaves = (u) => (typeof u == 'string' ? [u] : u.slice(1).flatMap(leaves));
+		const any = (u) => leaves(u).some(shown),
+			all = (u) => leaves(u).every(shown),
+			fbs = (u) => leaves(u).some(fb);
+		const check = (sp) => {
+			const [mode, ...us] = sp;
+			for (const u of us) if (typeof u != 'string') { const v = check(u); if (v) return v; }
+			const ls = leaves(sp);
+			if (mode == 'together') {
+				const on = ls.filter(shown);
+				if (on.length && on.length < ls.length) return `together: ${on.join(',')} shown while ${ls.filter((k) => !shown(k)).join(',')} not`;
+			}
+			if (mode == 'sequential' || mode == 'collapsed') {
+				for (let j = 1; j < us.length; j++)
+					if (any(us[j])) for (let i = 0; i < j; i++) if (!all(us[i])) return `${mode}: ${leaves(us[j]).join(',')} shown before ${leaves(us[i]).join(',')}`;
+				if (mode == 'collapsed') {
+					const front = us.findIndex((u) => !all(u));
+					for (let j = 0; j < us.length; j++) if (j != front && !all(us[j]) && fbs(us[j])) return `collapsed: fallback of ${leaves(us[j]).join(',')} shown behind the frontier`;
+				}
+			}
+		};
+		return check(spec);
+	};
+
 	const f = document.createElement('iframe');
 	(mount || document.body).append(f);
 	const w = f.contentWindow,
@@ -124,6 +166,8 @@ export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle
 		ctl,
 		events = [],
 		step = 0;
+	let acted = false,
+		revealBad = '';
 	const write = (op) => {
 		if (op[1] == 'a') {
 			if (wi >= writes.length) return;
@@ -148,6 +192,10 @@ export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle
 				// a wait is when the user could see the page
 				const dup = dupIds();
 				if (dup != null) glitches.push(`duplicate #${dup} after step ${step}`);
+				if (reveal && !acted && !revealBad) {
+					const v = revealCheck(root(), reveal);
+					if (v) revealBad = `${v}, after step ${step} (${schedule.filter((x) => x[0] != 'w').slice(0, step).join(' ')})`;
+				}
 				// the fresh render gets the same pauses between its actions: two
 				// actions in one batch are not the same as one after the other
 				if (events.length) events.push(['w', e]);
@@ -162,7 +210,7 @@ export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle
 				ctl = H.mk(name, root(), true, (m) => recoverable.push(m), doc);
 			else if (e[0] == 'C') H.gate('c:' + e.slice(2)).open();
 			else if (e == 'U') ctl.bump(), events.push(['U']);
-			else if (e[0] == 'A') ctl.act(e.slice(2)), events.push(['A', e.slice(2)]);
+			else if (e[0] == 'A') (acted = true), ctl.act(e.slice(2)), events.push(['A', e.slice(2)]);
 			else if (e == 'K') {
 				// data-m is set by an effect: the button is hydrated
 				// (the nth button with that id: one scenario renders a button twice)
@@ -239,6 +287,7 @@ export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle
 			throw { phase: 'noref', got: d.documentElement.getAttribute('data-noref'), want: '' };
 		if (errors.length && !expectErrors)
 			throw { phase: 'errors', got: errors.join(' | '), want: '' };
+		if (revealBad) throw { phase: 'reveal', got: revealBad, want: '' };
 		// What the stream left behind once everything settled.
 		let litter = d.querySelectorAll('template, preact-island').length;
 		const it = d.createNodeIterator(root(), 128 | 64);
@@ -334,5 +383,118 @@ export const timePage = async ({ name, writes, bundle, cs, gap = 30, limit = 400
 	} catch (e) {
 		f.remove();
 		return { ok: false, errors: [String((e && e.message) || e)] };
+	}
+};
+
+/**
+ * The same response with JavaScript off: written into a frame whose sandbox
+ * blocks scripts, so only the parser (and its native <template for>
+ * patches) acts on it. `reveal` is checked after every step. At the end the
+ * page must show what a fresh client render of the tree shows, minus what
+ * only a script adds (the settle marks).
+ */
+export const noJsPage = async ({ name, writes, schedule, bundle, reveal, canonIds, mount }) => {
+	// Which slots show content and which show fallbacks, against a <Reveal>
+	// spec: [order, ...units], a unit a slot key or a nested spec.
+	const revealCheck = (r, spec) => {
+		if (!r) return;
+		const vis = (sel) => [...r.querySelectorAll(sel)].some((e) => !e.closest('[hidden],template'));
+		const shown = (k) => vis(`[data-slot="${k}"]`),
+			fb = (k) => vis(`[data-sfb="${k}"]`);
+		const leaves = (u) => (typeof u == 'string' ? [u] : u.slice(1).flatMap(leaves));
+		const any = (u) => leaves(u).some(shown),
+			all = (u) => leaves(u).every(shown),
+			fbs = (u) => leaves(u).some(fb);
+		const check = (sp) => {
+			const [mode, ...us] = sp;
+			for (const u of us) if (typeof u != 'string') { const v = check(u); if (v) return v; }
+			const ls = leaves(sp);
+			if (mode == 'together') {
+				const on = ls.filter(shown);
+				if (on.length && on.length < ls.length) return `together: ${on.join(',')} shown while ${ls.filter((k) => !shown(k)).join(',')} not`;
+			}
+			if (mode == 'sequential' || mode == 'collapsed') {
+				for (let j = 1; j < us.length; j++)
+					if (any(us[j])) for (let i = 0; i < j; i++) if (!all(us[i])) return `${mode}: ${leaves(us[j]).join(',')} shown before ${leaves(us[i]).join(',')}`;
+				if (mode == 'collapsed') {
+					const front = us.findIndex((u) => !all(u));
+					for (let j = 0; j < us.length; j++) if (j != front && !all(us[j]) && fbs(us[j])) return `collapsed: fallback of ${leaves(us[j]).join(',')} shown behind the frontier`;
+				}
+			}
+		};
+		return check(spec);
+	};
+	const f = document.createElement('iframe');
+	f.setAttribute('sandbox', 'allow-same-origin');
+	const g = document.createElement('iframe');
+	(mount || document.body).append(f, g);
+	g.hidden = true;
+	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+	const wait = async (m) => {
+		if (m == 'w1') for (let i = 0; i < 4; i++) await Promise.resolve();
+		else if (m == 'w2') await sleep(45);
+	};
+	const d = f.contentDocument,
+		root = () => d.getElementById('root');
+	let revealBad = '',
+		step = 0;
+	try {
+		// the expected page: the tree rendered from scratch, every gate open
+		const gw = g.contentWindow;
+		gw.document.open();
+		gw.document.write('<!doctype html><body><div id="ref"></div></body>');
+		gw.document.close();
+		gw.eval(bundle);
+		const H = gw.__H;
+		for (const [, x] of H.env.gates) x.open();
+		const ref = gw.document.getElementById('ref');
+		H.mk(name, ref, false);
+		for (const k of H.scenarios[name].clientGates) H.gate('c:' + k).open();
+		for (const k of H.scenarios[name].serverGates) H.gate('c:' + k).open();
+		await sleep(60);
+		const canon = (x) => {
+			x = x.replace(/ data-m="\d+"/g, '');
+			if (!canonIds) return x;
+			const ids = new Map();
+			return x.replace(/(id|aria-labelledby)="([^"]*)"/g, (_, k, v) => {
+				if (!ids.has(v)) ids.set(v, 'u' + ids.size);
+				return `${k}="${ids.get(v)}"`;
+			});
+		};
+		d.open();
+		let wi = 0;
+		for (const e of schedule) {
+			if (e[0] == 'w') {
+				await wait(e);
+				if (reveal && !revealBad) {
+					const v = revealCheck(root(), reveal);
+					if (v) revealBad = `${v}, after step ${step}`;
+				}
+				continue;
+			}
+			step++;
+			if (e.startsWith('Wa:')) {
+				const s = writes[wi++];
+				let at = Math.floor(+e.slice(3) * s.length);
+				while (at && (s[at - 1] == '<' || s.slice(at - 2, at) == '</')) at--;
+				d.write(s.slice(0, at));
+				writes = [...writes.slice(0, wi), s.slice(at), ...writes.slice(wi)];
+			} else if (wi < writes.length) d.write(writes[wi++]);
+		}
+		while (wi < writes.length) d.write(writes[wi++]);
+		d.close();
+		await sleep(45);
+		const got = canon(H.ser(root())),
+			want = canon(H.ser(ref));
+		const litter = d.querySelectorAll('#root template').length;
+		f.remove();
+		g.remove();
+		if (got != want) return { ok: false, phase: 'final', got, want, revealBad };
+		if (revealBad) return { ok: false, phase: 'reveal', got: revealBad, want: '' };
+		return { ok: true, got, litter };
+	} catch (e) {
+		f.remove();
+		g.remove();
+		return { ok: false, phase: 'exception', got: String((e && e.stack) || e) };
 	}
 };
