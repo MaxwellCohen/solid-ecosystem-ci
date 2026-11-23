@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solid hydration harness</title>
+<style>
+:root{--bg:#fff;--fg:#1b1f24;--mute:#5b6570;--line:#d8dde3;--card:#f5f7f9;--ok:#d7f3de;--okfg:#14532d;--bad:#fbd9d6;--badfg:#7f1d1d;--warn:#fdecc8;--warnfg:#78350f;--link:#0a58ca;--btn:#0a58ca;--btnfg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#14171a;--fg:#e6e9ec;--mute:#9aa4af;--line:#2f353b;--card:#1d2226;--ok:#173a24;--okfg:#9be3b0;--bad:#4a1f1c;--badfg:#ffb4ae;--warn:#46350f;--warnfg:#f6d58e;--link:#6ea8fe;--btn:#3b82f6;--btnfg:#fff}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{margin:0 auto;padding:16px}
+h1{font-size:1.6rem;margin:.5em 0}
+h2{font-size:1.25rem;margin:1.8em 0 .5em;border-bottom:1px solid var(--line);padding-bottom:.25em}
+a{color:var(--link)}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85em}
+code{background:var(--card);padding:.05em .3em;border-radius:3px}
+pre{background:var(--card);padding:10px;border-radius:6px;overflow:auto;margin:.4em 0;white-space:pre-wrap;word-break:break-word;max-width:100%}
+.scroll{overflow-x:auto;max-width:100%;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td.l,th.l{text-align:left;white-space:normal}
+thead th{background:var(--card);position:sticky;top:0}
+td.ok{background:var(--ok);color:var(--okfg);text-align:center}
+td.bad{background:var(--bad);color:var(--badfg);text-align:center;font-weight:600}
+td.warn{background:var(--warn);color:var(--warnfg);text-align:center}
+.grid th:first-child,.grid td:first-child{position:sticky;left:0;background:var(--bg);z-index:1}
+.grid thead th:first-child{background:var(--card);z-index:2}
+.grid th.h{white-space:normal;min-width:5.5em;vertical-align:bottom;font-size:.8rem}
+form.run{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end;background:var(--card);padding:12px;border-radius:8px}
+form.run fieldset{grid-column:1/-1;border:1px solid var(--line);border-radius:6px;margin:0;padding:6px 10px}
+fieldset label{display:block;margin:2px 0}
+label.f{display:flex;flex-direction:column;font-size:.85rem;color:var(--mute);gap:2px}
+input[type=number],select{font:inherit;padding:5px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:5px;width:100%}
+select[multiple]{height:9em}
+button{font:inherit;padding:7px 14px;border-radius:6px;border:1px solid var(--btn);background:var(--btn);color:var(--btnfg);cursor:pointer}
+button.sec{background:transparent;color:var(--link);padding:2px 10px;font-size:.85rem}
+button:disabled{opacity:.5;cursor:default}
+#progress{margin:.8em 0;color:var(--mute);font-size:.9rem}
+progress{width:100%}
+details{margin:.3em 0}
+summary{cursor:pointer}
+main{max-width:1600px}
+.filters{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;margin:.6em 0;position:sticky;top:0;background:var(--bg);padding:6px 0;z-index:3;border-bottom:1px solid var(--line)}
+.filters input[type=search]{font:inherit;padding:4px 6px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:5px;width:12em;max-width:100%}
+.card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:12px 0;min-width:0}
+.card h3{margin:0;font-size:1.05rem;overflow-wrap:anywhere}
+.card .gates{font-size:.85rem;color:var(--mute);overflow-wrap:anywhere}
+.card details.src pre{max-height:22em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+.cols{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-top:8px}
+@media (max-width:1100px){.cols{grid-template-columns:minmax(0,1fr)}}
+.col{border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
+.col h4{margin:0 0 4px;font-size:.8rem;color:var(--mute);font-weight:600;overflow-wrap:anywhere}
+.line{margin:4px 0;font-size:.85rem;min-width:0}
+.line .tag{color:var(--mute);font-size:.75rem;text-transform:uppercase;letter-spacing:.03em}
+.pill{display:inline-block;padding:0 7px;border-radius:10px;font-weight:600}
+.pill.ok{background:var(--ok);color:var(--okfg)}
+.pill.bad{background:var(--bad);color:var(--badfg)}
+.pill.warn{background:var(--warn);color:var(--warnfg)}
+.ex{border-left:3px solid var(--badfg);padding-left:6px;margin:6px 0;min-width:0}
+.ex.g{border-left-color:var(--warnfg)}
+.ex code{overflow-wrap:anywhere;word-break:break-word}
+.gw{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px}
+.gw.one{grid-template-columns:minmax(0,1fr)}
+.gw pre{margin:0;font-size:.72rem;max-height:16em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all}
+.gw b{font-size:.7rem;color:var(--mute);display:block}
+mark{background:var(--bad);color:var(--badfg);border-radius:2px}
+pre.trace{max-height:20em;overflow:auto;font-size:.72rem;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all}
+.chips{list-style:none;margin:2px 0;padding:0;display:flex;flex-wrap:wrap;gap:3px;counter-reset:st}
+.chips li{counter-increment:st;font-size:.72rem;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:0 5px;overflow-wrap:anywhere}
+.chips li::before{content:counter(st) ". ";color:var(--mute)}
+.chips li.h{border-color:var(--btn)}
+.chips li.o{counter-increment:none;border-style:dashed}
+.chips li.o::before{content:""}
+mark.ok{background:var(--ok);color:var(--okfg)}
+.ctl{margin:8px 0}
+.live{margin:6px 0}
+.frames{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;margin-top:6px}
+@media (max-width:1100px){.frames{grid-template-columns:minmax(0,1fr)}}
+.frame{min-width:0;border:1px solid var(--line);border-radius:6px;padding:6px}
+.frame.ok{border:2px solid var(--okfg)}
+.frame.bad{border:3px solid var(--badfg);background:var(--bad)}
+.frame.exp{border:2px dashed var(--mute)}
+.legend{font-size:.8rem;color:var(--mute);margin:4px 0}
+.frame h4{margin:0 0 4px;font-size:.8rem;overflow-wrap:anywhere}
+.frame iframe{width:100%;height:80px;border:1px solid var(--line);background:#fff;color-scheme:light;display:block}
+pre.got{max-height:14em;overflow:auto;font-size:.72rem;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all}
+.fail{border-left:3px solid var(--badfg);padding-left:10px;margin:.6em 0}
+.mute{color:var(--mute)}
+.sc{border:1px solid var(--line);border-radius:6px;padding:4px 10px}
+body>iframe{position:fixed;left:-10000px;top:0;width:600px;height:400px;border:0}
+</style>
+</head>
+<body>
+<main>
+<h1>Solid streaming hydration harness</h1>
+<p><a href="/">&larr; Solid streaming demo</a></p>
+<p>Each test takes a tree with <code>&lt;Loading&gt;</code> boundaries and streams it from the server, in several parts, into an iframe with <code>document.write</code>, so the real HTML parser sees it. The page is written in a random order mixed with hydration, client code finishing loading, re-renders, button clicks, reorders, hiding and showing, unmounts, parts split in two at a random byte, and connections that drop. When everything has arrived, the same tree is rendered from scratch next to it with the same actions, and the two are compared.</p>
+<p>A run fails when the hydrated DOM differs from that fresh render (right away, after clicking every button, or after one more re-render), a settle callback ran twice or a ref was missing, an id shows up twice, or anything was logged as an error. Not counted as failures: <b>glitch</b> (an id was visible twice at some step) and <b>kept</b> (share of buttons still the nodes the parser created, so server DOM was hydrated rather than replaced).</p>
+<p>This is the Solid port of <a href="https://preact-streaming-harness.to-email-max.workers.dev/">the Preact/React streaming harness</a>: the same 74 trees and the same schedules and checks (<code>runner.js</code> is shared). Solid has no <code>throw promise</code>, so a gate is an async memo: the server's waits on gate <code>s:&lt;name&gt;</code> and streams its value with the chunk, the client's waits on gate <code>c:&lt;name&gt;</code>, the way code that hasn't loaded yet holds a subtree when hydration reaches it. React-only shapes map to their Solid counterparts (class components and <code>memo()</code> to plain components, <code>useId</code> to <code>createUniqueId</code>, error boundaries to <code>&lt;Errored&gt;</code>, keyed lists to <code>&lt;For&gt;</code>). Some trees test React's contract and fail by design in Solid: a server error with no <code>&lt;Errored&gt;</code> above it fails the render or rethrows on the client instead of being retried there.</p>
+<p>Work compared: Solid 2.0.3 from npm, and <a href="https://github.com/MaxwellCohen/solid/pull/2">MaxwellCohen/solid#2</a> (boundary ranges with <code>&lt;template for&gt;</code> declarative patches, held Reveal patches, batched-swap hydration). Source: <code>harness/</code> in <a href="https://github.com/MaxwellCohen/solid-ecosystem-ci/tree/feat/reveal-dpu-demo/harness">MaxwellCohen/solid-ecosystem-ci</a>.</p>
+
+<h2>Totals</h2>
+<p class="mute" id="res-note">Loading...</p>
+<div class="scroll"><table id="res-table"></table></div>
+<h2>Timing</h2>
+<p class="mute">Solid records every flush (one drain of the reactive queue), every async flight and every showing of a <code>&lt;Loading&gt;</code> fallback when its observe build runs. Each tree loads with the shell, hydration right after it, each later chunk 30&nbsp;ms apart, then its client code arriving. <b>settle</b> is the time from that last input to every fallback gone and every button hydrated (polled every 5&nbsp;ms, so differences under about 5&nbsp;ms are noise). <b>flushes</b>, <b>flush&nbsp;ms</b> and <b>runs</b> are the reactive work hydration did; <b>fallbacks</b> counts fallback showings, with how long they stayed. Medians of the recorded loads; lower is better.</p>
+<p class="mute" id="tim-note"></p>
+<div style="margin:.6em 0"><button type="button" id="tim-run">Time in this browser</button> <span class="mute" id="tim-st"></span></div>
+<div class="scroll"><table id="tim-table" class="grid"></table></div>
+
+<h2>Run it yourself</h2>
+<form class="run" id="form" onsubmit="return false">
+<fieldset><legend>Targets</legend><div id="targets"></div></fieldset>
+<fieldset><legend>Scenarios</legend>
+<label><input type="radio" name="sel" value="all" checked> all</label>
+<label><input type="radio" name="sel" value="pick"> pick</label>
+<select id="pick" multiple hidden aria-label="Scenarios"></select>
+</fieldset>
+<label class="f">Schedules per scenario<input id="n" type="number" min="1" max="500" value="10"></label>
+<label class="f">Split share<input id="split" type="number" min="0" max="1" step="0.05" value="0.35"></label>
+<label class="f">Cut share<input id="cut" type="number" min="0" max="1" step="0.05" value="0.1"></label>
+<label class="f">Seed<input id="seed" type="number" value="1"></label>
+<div><button id="run" type="button">Run</button> <button id="stop" type="button" class="sec" disabled>Stop</button></div>
+</form>
+<div id="progress" aria-live="polite"></div>
+<progress id="bar" value="0" max="1" hidden></progress>
+<div class="scroll" id="out-wrap" hidden><table id="out"></table></div>
+
+<h2>Side by side</h2>
+<p class="mute">The same JSX renders on the server and in the client. <code>&lt;Suspends server="a"&gt;</code> waits on the server until gate <code>a</code> opens, which sends one streamed chunk. <code>&lt;Suspends client="x"&gt;</code> waits on the client until gate <code>x</code> opens, like a lazy component that isn't loaded yet when hydration reaches it. <code>seq</code> lists the actions a schedule may fire. Each build column shows the comparison run (Chrome, same seed and schedules for every build) when it was recorded, otherwise the recorded stream run in Chrome. <b>Run it yourself</b> adds a second line, "your run".</p>
+<p class="mute" id="src-note"></p>
+<div class="filters">
+<label><input type="checkbox" id="f-diff"> only scenarios where builds differ</label>
+<label><input type="checkbox" id="f-fail"> only failing</label>
+<label class="f2">Scenario <input type="search" id="f-name" placeholder="filter by name"></label>
+<button type="button" class="sec" id="f-src">Show all JSX</button>
+<button type="button" class="sec" id="f-runall">Run all in this browser</button>
+<span class="mute" id="f-runst"></span>
+<span class="mute" id="f-count"></span>
+</div>
+<div id="cards"></div>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

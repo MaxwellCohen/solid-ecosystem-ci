@@ -28,6 +28,7 @@ export function Harness(props: { diag?: boolean; list?: Scenario[] }) {
       <nav class="mt-1">
         <a class={link} href="/">all</a>{' '}
         <a class={link} href="/dpu">dpu diagnostics</a>{' '}
+        <a class={link} href="/harness/">hydration harness</a>{' '}
         <For each={groups}>{(g) => <><a class={link} href={`/?group=${g}`}>{g}</a>{' '}</>}</For>
         | hydrate: <a class={link} href="?hydrate=on">on</a>{' '}
         <a class={link} href="?hydrate=off">off</a>

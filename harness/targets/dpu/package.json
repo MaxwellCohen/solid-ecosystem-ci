@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "dependencies": {
+    "solid-js": "file:/Users/maxcohen/code/solid-js/solid-disarm-pe/packages/solid",
+    "@solidjs/web": "file:/Users/maxcohen/code/solid-js/solid-disarm-pe/packages/web",
+    "@solidjs/signals": "file:/Users/maxcohen/code/solid-js/solid-disarm-pe/packages/signals",
+    "@solidjs/compiler": "2.0.0-rc.21"
+  }
+}

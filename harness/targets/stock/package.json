@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "dependencies": {
+    "solid-js": "2.0.3",
+    "@solidjs/web": "2.0.3",
+    "@solidjs/compiler": "2.0.2"
+  }
+}
