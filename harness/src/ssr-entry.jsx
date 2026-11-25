@@ -1,5 +1,5 @@
 import { renderToStream, generateHydrationScript } from '@solidjs/web';
-import { App, resetEnv, gate, scenarios } from './scenarios.jsx';
+import { App, resetEnv, gate, scenarios, manifest, preloadLate } from './scenarios.jsx';
 export { scenarios };
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
@@ -16,6 +16,7 @@ const TAIL = '</div></body></html>';
  */
 export async function ssr(name, order) {
 	resetEnv();
+	await preloadLate();
 	const errors = [];
 	const out = [''];
 	let headHtml = '';
@@ -25,6 +26,7 @@ export async function ssr(name, order) {
 	try {
 		stream = renderToStream(() => <App name={name} />, {
 			signal: ac.signal,
+			manifest,
 			onHead: (h) => (headHtml += h),
 			onError(e, ctx) {
 				if (ctx && ctx.handling && ctx.handling != 'failed') return;

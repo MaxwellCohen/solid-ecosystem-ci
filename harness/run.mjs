@@ -142,4 +142,6 @@ fs.writeFileSync(
 	new URL(`./out/${outName}/summary.${mode}${args.tag ? '.' + args.tag : ''}.json`, here),
 	JSON.stringify({ label, mode, n: N, seed: +(args.seed || 1), totals: tot, scenarios: summary }, null, 1)
 );
-await browser.close();
+// Frames that still wait on a late module can keep Chrome from closing.
+await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 5000))]);
+process.exit(0);

@@ -1,7 +1,7 @@
 import { OBSERVE } from 'solid-js';
 import { attribution } from 'solid-js/attribution';
 import { hydrate, render } from '@solidjs/web';
-import { App, env, gate, scenarios } from './scenarios.jsx';
+import { App, env, gate, Passthrough, scenarios } from './scenarios.jsx';
 
 const SKIP = /^(script|template|link|style)$/;
 /** Elements and text only: what the user sees, whatever markers are around it. */
@@ -11,7 +11,8 @@ function ser(n) {
 		if (c.nodeType == 3) o += c.data;
 		else if (c.nodeType == 1 && !SKIP.test(c.localName) && !c.hidden) {
 			const a = [...c.attributes]
-				.filter((a) => a.name != '_hk' && (a.name != 'style' || a.value))
+				// xmlns is how JSX names a namespace; the client template drops it
+				.filter((a) => a.name != '_hk' && a.name != 'xmlns' && (a.name != 'style' || a.value))
 				.map((a) => `${a.name}="${a.value}"`)
 				.sort()
 				.join(' ');
@@ -60,4 +61,4 @@ function timing() {
 		return t;
 	};
 }
-window.__H = { ser, mk, gate, env, scenarios, timing, FW: 'solid' };
+window.__H = { ser, mk, gate, env, scenarios, timing, Passthrough, FW: 'solid' };

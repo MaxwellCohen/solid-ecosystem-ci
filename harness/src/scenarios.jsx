@@ -5,6 +5,7 @@ import {
 	createUniqueId,
 	Errored,
 	For,
+	lazy,
 	Loading,
 	Match,
 	onSettled,
@@ -24,10 +25,10 @@ import { dynamic } from '@solidjs/web';
  * the gates the client waits on while hydrating. `seq` lists the actions a
  * schedule may fire, in order.
  *
- * Solid has no `throw promise`: a gate is an async memo. The server's memo
- * waits on gate `s:<name>` (its value streams to the client with the chunk);
- * the client's memo waits on gate `c:<name>`, the way code that isn't loaded
- * yet holds the subtree when hydration reaches it.
+ * Solid has no `throw promise`: a server gate is an async memo waiting on
+ * gate `s:<name>` (its value streams to the client with the chunk), and a
+ * client gate is a lazy() component whose module loads when gate `c:<name>`
+ * opens.
  */
 
 // Solid's hydration trace swaps the global Promise for a stub that never
@@ -61,20 +62,44 @@ const wait = (key) => {
 };
 
 /**
+ * Code that loads late on the client: a real lazy() per client gate. The
+ * server has the module already (ssr-entry preloads it) and writes the
+ * boundary's module map; the hydrating client imports the entry the map
+ * names, which waits on gate `c:<name>` (see `manifest`), and a fresh client
+ * render waits on the same gate through the import thunk.
+ */
+const lates = new Map();
+function late(name) {
+	let L = lates.get(name);
+	if (!L)
+		lates.set(
+			name,
+			(L = lazy(
+				() => (SERVER ? NativePromise.resolve() : gate('c:' + name).p).then(() => ({ default: Passthrough })),
+				undefined,
+				'late:' + name
+			))
+		);
+	return L;
+}
+export const preloadLate = () => NativePromise.all(['x', 'y'].map((k) => late(k).preload()));
+/** The asset manifest: the client entry of late module `late:<name>`. */
+export const manifest = (url) => ({
+	js: [`data:text/javascript,await __H.gate('c:${url.slice(5)}').p;export default __H.Passthrough`],
+	css: []
+});
+
+/**
  * Suspends on the server until gate `server` opens (one streamed chunk), and
- * on the client until gate `client` opens. Both memos exist on both sides,
- * so the trees match.
+ * on the client until the code behind gate `client` has loaded.
  */
 function Suspends(props) {
 	const s = createMemo(() => (SERVER && props.server ? wait('s:' + props.server) : true));
-	const c = createMemo(() => (!SERVER && props.client ? wait('c:' + props.client) : true));
-	return <>{(s(), c(), props.children)}</>;
+	const Late = props.client && late(props.client);
+	return <>{(s(), Late ? <Late>{props.children}</Late> : props.children)}</>;
 }
 
-/**
- * Solid's lazy() needs an asset manifest on the server, so a "real lazy"
- * counter is the same client gate as Suspends around a Counter.
- */
+/** A counter whose code loads late on the client. */
 function LazyCounter(props) {
 	return (
 		<Suspends client={props.client}>
@@ -102,24 +127,22 @@ function Counter(props) {
 }
 /** A Loading boundary, behind a component like most apps have one. */
 const Boundary = (props) => <Loading fallback={props.fallback}>{props.children}</Loading>;
-const Passthrough = (props) => props.children;
-function ThrowsOnServer(props) {
-	if (SERVER) throw new Error('server boom');
-	return props.children;
+export const Passthrough = (props) => props.children;
+/**
+ * Solid has one error model on both sides: an error the server hits reaches
+ * the client's <Errored> as the same error, and the client never retries the
+ * render for it. So what fails here fails wherever it renders.
+ */
+function Throws() {
+	throw new Error('boom');
 }
-function ThrowsOnServerLater(props) {
-	const v = createMemo(() =>
-		SERVER
-			? gate('s:' + props.server).p.then(() => {
-					throw new Error('server boom late');
-				})
-			: true
-	);
+/** Fails on the client when `on` turns true: an action, at any point of the stream. */
+function ThrowsWhen(props) {
+	const v = createMemo(() => {
+		if (props.on) throw new Error('client boom');
+		return true;
+	});
 	return <>{(v(), props.children)}</>;
-}
-function ThrowsOnClient(props) {
-	if (!SERVER) throw new Error('client boom');
-	return props.children;
 }
 const ErrorBoundary = (props) => <Errored fallback={<p data-caught="">caught</p>}>{props.children}</Errored>;
 /** A component with state and a click handler (a class component in React). */
@@ -332,9 +355,9 @@ export const scenarios = {
 		render: () => <div><svg width="200" height="40"><Boundary fallback={<rect width="30" height="30" fill="#bbb" />}><Suspends server="a" client="x"><foreignObject width="120" height="40"><div><Counter id="in" /></div></foreignObject><circle cx="150" cy="20" r="12" fill="teal" /></Suspends></Boundary></svg><Counter id="z" /></div>
 	},
 	svgTitle: {
-		about: 'A boundary in an svg streams a title and a desc whose text has angle brackets and an ampersand, plus a circle. The text must read the same as in a client render, and the circle must be drawn.',
+		about: 'A boundary in an svg streams a title and a desc whose text has angle brackets and an ampersand, plus a circle. The text must read the same as in a client render, and the circle must be drawn. (title is also an HTML tag, so the JSX names its namespace.)',
 		serverGates: ['a'], clientGates: ['x'],
-		render: () => <div><svg width="120" height="30"><Boundary fallback={<rect width="30" height="30" fill="#bbb" />}><Suspends server="a" client="x"><title>{'a < b & c'}</title><desc>{'d > e'}</desc><circle cx="15" cy="15" r="12" fill="teal" /></Suspends></Boundary></svg><Counter id="z" /></div>
+		render: () => <div><svg width="120" height="30"><Boundary fallback={<rect width="30" height="30" fill="#bbb" />}><Suspends server="a" client="x"><title xmlns="http://www.w3.org/2000/svg">{'a < b & c'}</title><desc>{'d > e'}</desc><circle cx="15" cy="15" r="12" fill="teal" /></Suspends></Boundary></svg><Counter id="z" /></div>
 	},
 	math: {
 		about: 'A boundary inside a math element streams two math elements (mi, mn) late, with a mi fallback. They must end up in the MathML namespace, in order, with no fallback left.',
@@ -515,22 +538,19 @@ export const scenarios = {
 
 	// --- errors and cut streams -----------------------------------------
 	serverError: {
-		nojs: false, // the expected page needs a script by definition
-		about: 'The server render fails inside a boundary (ThrowsOnServer), so the client must render that boundary itself, after late client code. The final page must show its counter, hydrated once.',
-		serverGates: [], clientGates: ['x'],
-		render: () => <div><Boundary fallback={fallbackText('F')}><ThrowsOnServer><Suspends client="x"><Counter id="in" /></Suspends></ThrowsOnServer></Boundary><Counter id="z" /></div>
+		about: 'A boundary\'s content fails where it renders, on the server and on the client, inside an <Errored>. The shell carries the <Errored> fallback; the client must hydrate it, and the other counter once.',
+		serverGates: [], clientGates: [], expectErrors: true,
+		render: () => <div><ErrorBoundary><Boundary fallback={fallbackText('F')}><Throws /></Boundary></ErrorBoundary><Counter id="z" /></div>
 	},
 	serverErrorLate: {
-		nojs: false, // the expected page needs a script by definition
-		about: 'A boundary fails on the server after waiting on gate a, while a second boundary streams on gate b. The client must render the failed boundary after late client code, and the second must stream.',
-		serverGates: ['a', 'b'], clientGates: ['x'],
-		render: () => <div><Boundary fallback={fallbackText('F')}><ThrowsOnServerLater server="a"><Suspends client="x"><Counter id="in" /></Suspends></ThrowsOnServerLater></Boundary><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="g" /></Suspends></Boundary><Counter id="z" /></div>
+		about: 'A boundary inside an <Errored> fails after gate a (on the client after late code x), while a second boundary streams on gate b. The failed one must end as the <Errored> fallback the server streamed, and the second must stream and hydrate once.',
+		serverGates: ['a', 'b'], clientGates: ['x'], expectErrors: true,
+		render: () => <div><ErrorBoundary><Boundary fallback={fallbackText('F')}><ThrowsLater server="a" client="x"><Counter id="in" /></ThrowsLater></Boundary></ErrorBoundary><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="g" /></Suspends></Boundary><Counter id="z" /></div>
 	},
 	serverErrorNested: {
-		nojs: false, // the expected page needs a script by definition
-		about: 'An outer boundary streams on gate a (late client code), holding a counter and an inner boundary that fails on the server after gate b. The client must render the inner part.',
-		serverGates: ['a', 'b'], clientGates: ['x'],
-		render: () => <div><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><div><Counter id="o" /><Boundary fallback={fallbackText('G')}><ThrowsOnServerLater server="b"><Counter id="in" /></ThrowsOnServerLater></Boundary></div></Suspends></Boundary><Counter id="z" /></div>
+		about: 'An outer boundary streams on gate a (late client code x), holding a counter and an <Errored> around an inner boundary that fails after gate b. The outer counter must hydrate once and the inner part must end as the <Errored> fallback.',
+		serverGates: ['a', 'b'], clientGates: ['x', 'y'], expectErrors: true,
+		render: () => <div><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><div><Counter id="o" /><ErrorBoundary><Boundary fallback={fallbackText('G')}><ThrowsLater server="b" client="y"><Counter id="in" /></ThrowsLater></Boundary></ErrorBoundary></div></Suspends></Boundary><Counter id="z" /></div>
 	},
 	abort: {
 		nojs: false, // the expected page needs a script by definition
@@ -539,16 +559,16 @@ export const scenarios = {
 		render: () => <div><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><div><Counter id="o" /><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="i" /></Suspends></Boundary></div></Suspends></Boundary><Counter id="z" /></div>
 	},
 	clientError: {
-		nojs: false, // the expected page needs a script by definition
-		about: 'A boundary streams a b element on gate a, but its content throws on the client, inside an error boundary. The error boundary must show caught, the error is expected, and the other counter must hydrate once.',
-		serverGates: ['a'], clientGates: [], expectErrors: true,
-		render: () => <div><ErrorBoundary><Boundary fallback={fallbackText('F')}><Suspends server="a"><ThrowsOnClient><b>srv</b></ThrowsOnClient></Suspends></Boundary></ErrorBoundary><Counter id="z" /></div>
+		about: 'A boundary streams a b element on gate a, and an action makes its content throw on the client, at any point of the stream, inside an error boundary. The error boundary must show caught, and the other counter must hydrate once.',
+		serverGates: ['a'], clientGates: [], expectErrors: true, init: { boom: false },
+		actions: { boom: () => ({ boom: true }) }, seq: ['boom'],
+		render: (st) => <div><ErrorBoundary><Boundary fallback={fallbackText('F')}><Suspends server="a"><ThrowsWhen on={st().boom}><b>srv</b></ThrowsWhen></Suspends></Boundary></ErrorBoundary><Counter id="z" /></div>
 	},
 	clientErrorSibling: {
-		nojs: false, // the expected page needs a script by definition
-		about: 'Two boundaries stream counters (gates a and b) around a child that throws on the client, all inside an error boundary. The error boundary must show caught, the error is expected, and the other counter must hydrate once.',
-		serverGates: ['a', 'b'], clientGates: [], expectErrors: true,
-		render: () => <div><ErrorBoundary><div><Boundary fallback={fallbackText('F')}><Suspends server="a"><Counter id="in" /></Suspends></Boundary><ThrowsOnClient><b>srv</b></ThrowsOnClient><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="g" /></Suspends></Boundary></div></ErrorBoundary><Counter id="z" /></div>
+		about: 'Two boundaries stream counters (gates a and b) around a child that an action makes throw on the client, all inside an error boundary. The error boundary must show caught, and the other counter must hydrate once.',
+		serverGates: ['a', 'b'], clientGates: [], expectErrors: true, init: { boom: false },
+		actions: { boom: () => ({ boom: true }) }, seq: ['boom'],
+		render: (st) => <div><ErrorBoundary><div><Boundary fallback={fallbackText('F')}><Suspends server="a"><Counter id="in" /></Suspends></Boundary><ThrowsWhen on={st().boom}><b>srv</b></ThrowsWhen><Boundary fallback={fallbackText('G')}><Suspends server="b"><Counter id="g" /></Suspends></Boundary></div></ErrorBoundary><Counter id="z" /></div>
 	},
 
 	// --- the tree changes while the stream is still open -----------------
@@ -598,7 +618,7 @@ export const scenarios = {
 		about: 'The section wrapping a streamed boundary (gate a, late client code) gets a new key by an action, so its content is remounted. The page must end with one fresh counter in the section, hydrated once.',
 		serverGates: ['a'], clientGates: ['x'], init: { k: 1 },
 		actions: { rekey: (st) => ({ k: st.k + 1 }) }, seq: ['rekey'],
-		render: (st) => <div><Show when={st().k} keyed>{() => <section><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><Counter id="in" /></Suspends></Boundary></section>}</Show><Counter id="z" /></div>
+		render: (st) => <div><Show when={st().k} keyed>{(k) => <section data-k={k}><Boundary fallback={fallbackText('F')}><Suspends server="a" client="x"><Counter id="in" /></Suspends></Boundary></section>}</Show><Counter id="z" /></div>
 	},
 	later: {
 		about: 'An action, possibly after hydration, makes a child inside a streamed boundary (gate a, late client code x) suspend on other late client code. The page must settle with the counter shown, hydrated once.',

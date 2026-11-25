@@ -223,7 +223,7 @@ export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle
 			if (trace) {
 				const r = root();
 				log.push(
-					e + ' => ' + (r ? r.innerHTML.replace(/<script>[^<]{200,}<\/script>/g, '<INIT>') : '-')
+					e + ' => ' + (r ? r.innerHTML.replace(/<script>[\s\S]*?<\/script>/g, '<S>') : '-')
 				);
 			}
 		}
@@ -274,7 +274,8 @@ export const inPage = async ({ name, writes, schedule, bundle, cs, trace, settle
 		await same('settled');
 		if (trace) log.push('settled => ' + root().innerHTML.replace(/<script>[^<]{200,}<\/script>/g, '<INIT>'));
 		const btns = [...root().querySelectorAll('button')];
-		const kept = btns.filter((b) => !b.__cli).length;
+		// Solid clones templates, so a client node is not tagged; a server node carries its key.
+		const kept = btns.filter((b) => (H.FW == 'solid' ? b.hasAttribute('_hk') : !b.__cli)).length;
 		const dup = dupIds();
 		if (dup != null) throw { phase: 'duplicate', got: '#' + dup, want: '' };
 		btns.forEach((b) => b.click());
